@@ -184,7 +184,7 @@ const PLACE_ES = { "viridian forest": "Bosque Verde", "power plant": "Central En
 const prettyArea = s => { let t = s.replace(/^kanto-/, "").replace(/-area$/, "").replace(/-/g, " "); for (const [en, es] of Object.entries(PLACE_ES)) t = t.replace(new RegExp("\\b" + en + "\\b"), es); return t.replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(\d+)f\b/gi, "planta $1").replace(/\bB(\d+)f\b/gi, "sótano $1"); };
 
 // ======================= ESTADO E INTERFAZ =======================
-const state = { tab: "pokedex", loaded: false, syncNote: "", camError: "", f: { q: "", status: "all", variant: "all", type: "", leg: false, big: false, shinySprites: false }, pending: null, stream: null };
+const state = { tab: "pokedex", loaded: false, syncNote: "", camError: "", f: { q: "", state: null, normal: false, shiny: false, types: [], leg: false, big: false, shinySprites: false }, pending: null, stream: null };
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtDate = ms => new Date(ms).toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" });
@@ -193,6 +193,8 @@ const pad = n => String(n).padStart(3, "0");
 function toast(msg) { const t = document.createElement("div"); t.className = "toast pop"; t.setAttribute("role", "status"); t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 3200); }
 const ICON = {
   ball: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#222" stroke-width="1.6"/><path d="M2 12a10 10 0 0 1 20 0z" fill="#e53935" stroke="#222" stroke-width="1.6"/><circle cx="12" cy="12" r="3.2" fill="#fff" stroke="#222" stroke-width="1.6"/></svg>',
+  ballOff: '<svg viewBox="0 0 24 24" class="off" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M2.5 12h6.5M15 12h6.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  starOff: '<svg viewBox="0 0 24 24" class="off" aria-hidden="true"><path d="M12 3.2l2.6 5.9 6.4.6-4.8 4.2 1.4 6.3L12 17l-5.6 3.2 1.4-6.3L3 9.7l6.4-.6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   star: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z" fill="#F9A825" stroke="#a66f00" stroke-width="1"/></svg>',
   dex: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><circle cx="9" cy="8" r="2"/><path d="M8 14h8M8 17h5"/></svg>',
   trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>',
@@ -239,23 +241,22 @@ function viewWelcome() {
 }
 
 // ---------- Pokédex (cajas de 30 como la app Android: 6 columnas x 5 filas) ----------
+// Mismo comportamiento que CaptureFilter.matches de la app Android
+function statusOf(cs) { return { caught: cs.some(c => !c.isShiny), shiny: cs.some(c => c.isShiny) }; }
 function matchesFilters(mn, cs) {
-  const f = state.f, q = f.q.trim().toLowerCase();
+  const f = state.f, q = f.q.trim().toLowerCase(), st = statusOf(cs);
   if (q && !(mn.name.toLowerCase().includes(q) || String(mn.id) === q.replace(/^0+/, "") || pad(mn.id).startsWith(q))) return false;
-  if (f.status === "got" && !cs.length) return false;
-  if (f.status === "miss" && cs.length) return false;
-  if (f.variant === "normal" && !cs.some(c => !c.isShiny)) return false;
-  if (f.variant === "shiny" && !cs.some(c => c.isShiny)) return false;
-  if (f.type && !mn.types.includes(f.type)) return false;
-  if (f.leg && !LEGENDARY.includes(mn.id)) return false;
+  if (f.state === "got") { if (!(f.normal && f.shiny ? st.caught && st.shiny : f.normal ? st.caught : f.shiny ? st.shiny : st.caught || st.shiny)) return false; }
+  if (f.state === "miss") { if (!(f.normal && f.shiny ? !st.caught && !st.shiny : f.normal ? !st.caught : f.shiny ? !st.shiny : !st.caught && !st.shiny)) return false; }
+  if (f.types.length && !mn.types.some(t => f.types.includes(t))) return false;
+  if (f.leg && !LEGENDARY.includes(mn.id) && mn.id !== 151) return false;
   return true;
 }
 function viewDex(D) {
   const f = state.f;
-  const anyF = f.q.trim() || f.status !== "all" || f.variant !== "all" || f.type || f.leg;
+  const anyF = f.q.trim() || f.state || f.types.length || f.leg;
   const dexN = Object.keys(D.byId).filter(id => id <= KANTO_SIZE).length;
   const shN = Object.entries(D.byId).filter(([id, l]) => id <= KANTO_SIZE && l.some(c => c.isShiny)).length;
-  const chip = (k, v, label) => `<button class="chip" aria-pressed="${f[k] === v}" data-f="${k}" data-v="${v}">${label}</button>`;
   const boxes = []; for (let a = 1; a <= 151; a += 30) boxes.push([a, Math.min(a + 29, 151)]);
   return `
   <div class="card">
@@ -267,13 +268,15 @@ function viewDex(D) {
     <button class="chip" id="sizeBtn" aria-pressed="${f.big}" title="También puedes pellizcar la cuadrícula">${f.big ? "Vista grande" : "Vista de cajas"}</button>
     <button class="chip" data-f="shinySprites" data-v="toggle" aria-pressed="${f.shinySprites}">★ Sprites variocolor</button>
   </div>
-  <div class="filters">
-    ${chip("status", "all", "Todos")}${chip("status", "got", "Capturados")}${chip("status", "miss", "Sin capturar")}
-    ${chip("variant", "normal", "Normal")}${chip("variant", "shiny", "★ Variocolor")}
+  <div class="filters" role="group" aria-label="Filtro de captura">
+    <button class="chip" data-st="got" aria-pressed="${f.state === "got"}">${ICON.ball.replace("<svg", '<svg width="14" height="14"')} Capturados</button>
+    <button class="chip" data-st="miss" aria-pressed="${f.state === "miss"}">No capturados</button>
+    <button class="chip" data-sub="normal" aria-pressed="${f.normal}" ${f.state ? "" : "disabled"}>Normal</button>
+    <button class="chip" data-sub="shiny" aria-pressed="${f.shiny}" ${f.state ? "" : "disabled"}>★ Variocolor</button>
     <button class="chip" aria-pressed="${f.leg}" data-f="leg" data-v="toggle">Legendarios</button>
-    <select id="typeSel" aria-label="Filtrar por tipo"><option value="">Todos los tipos</option>${TYPES.map(t => `<option value="${t}" ${f.type === t ? "selected" : ""}>${TYPE_ES[t]}</option>`).join("")}</select>
     ${anyF ? `<button class="chip" id="clearF">Limpiar filtros</button>` : ""}
   </div>
+  <div class="filters types" role="group" aria-label="Filtrar por tipo">${TYPES.map(t => `<button class="chip tchip" data-type="${t}" aria-pressed="${f.types.includes(t)}" style="--tc:${TYPE_COLOR[t]}">${TYPE_ES[t]}</button>`).join("")}</div>
   <div class="pc ${f.big ? "large" : "boxmode"}" id="pc">
   ${boxes.map(([a, b], i) => {
     const mons = DEX.slice(a - 1, b);
@@ -286,10 +289,10 @@ function viewDex(D) {
   </div>`;
 }
 function cell(mn, cs) {
-  const got = cs.length > 0, sh = cs.some(c => c.isShiny), match = matchesFilters(mn, cs);
-  const label = `${pad(mn.id)} ${mn.name}, ${got ? "capturado" : "sin capturar"}${sh ? ", variocolor capturado" : ""}${match ? "" : ", no coincide con el filtro"}`;
-  return `<button class="mon ${got ? "got" : "miss"} ${match ? "" : "dim"}" data-mon="${mn.id}" ${match ? "" : 'tabindex="-1" aria-disabled="true"'} aria-label="${esc(label)}">
-    <span class="ind"><span class="i-ball">${got ? ICON.ball : ""}</span><span class="i-star">${sh ? ICON.star : ""}</span></span>
+  const st = statusOf(cs), match = matchesFilters(mn, cs);
+  const label = `Nº ${pad(mn.id)}, ${mn.name}, ${st.caught ? "capturado" : "no capturado"}, ${st.shiny ? "variocolor capturado" : "variocolor no capturado"}${match ? "" : ", no coincide con el filtro"}`;
+  return `<button class="mon ${match ? "" : "dim"}" data-mon="${mn.id}" ${match ? "" : 'tabindex="-1" aria-disabled="true"'} aria-label="${esc(label)}">
+    <span class="ind" aria-hidden="true">${st.caught ? ICON.ball : ICON.ballOff}${st.shiny ? ICON.star : ICON.starOff}</span>
     <img class="sp" loading="lazy" src="${spriteUrl(mn.id, state.f.shinySprites)}" alt="" onerror="this.onerror=null;this.src='${SPR_FALLBACK}${mn.id}.png'">
     <span class="num pixel">#${pad(mn.id)}</span>${state.f.big ? `<span class="nm">${esc(mn.name)}</span>` : ""}</button>`;
 }
@@ -330,33 +333,65 @@ async function openMon(id) {
   } catch (e) { const el = $("#det"); if (el) el.innerHTML = `Sin conexión con la PokéAPI. <button class="chip" data-mon="${id}">Reintentar</button>`; }
 }
 
-// ---------- Logros ----------
+// ---------- Logros (mismo diseño que AchievementsScreen de la app Android) ----------
+const BALL_ITEM = lvl => "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/" + (lvl <= 3 ? "poke-ball" : lvl <= 6 ? "great-ball" : lvl <= 9 ? "ultra-ball" : "master-ball") + ".png";
+const LEG_COLOR = { 144: "#4FA3E0", 145: "#F7D02C", 146: "#E8692A", 150: "#8E44AD" };
+const bar = (p, cls = "", style = "") => `<div class="abar ${cls}" role="progressbar" aria-valuenow="${Math.round(p * 100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.max(0, Math.min(1, p)) * 100}%;${style}"></i></div>`;
+const CHECK = (on, color) => on ? `<svg class="ck" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="${color}"/><path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>` : `<svg class="ck" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2" opacity=".45"/></svg>`;
+function track(D, items) {
+  const current = Math.min(D.ach.progress(items[0]), D.ach.target(items[items.length - 1])), max = D.ach.target(items[items.length - 1]);
+  const done = items.filter(a => D.ach.unlocked[a.id]); return { items, current, max, rank: done[done.length - 1] || null, p: max ? current / max : 0 };
+}
+const rankRows = (D, items, color, unit) => items.map(a => { const un = D.ach.unlocked[a.id]; return `<div class="rank ${un ? "" : "off"}">${CHECK(un, color)}<div class="rk"><div>${esc(a.title)}</div><small>${a.target} ${unit}</small></div>${un ? `<small class="muted">${fmtDate(un)}</small>` : ""}</div>`; }).join("");
+function countdown(ms) { const m = Math.max(0, Math.floor(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60), mm = m % 60; return d ? `${d} d ${h} h` : h ? `${h} h ${mm} min` : `${mm} min`; }
+function challengeCard(ch, D, title) {
+  const p = challengeProgress(ch, D.caps), n = p.done.filter(Boolean).length;
+  return `<div class="card acard"><div class="row" style="justify-content:space-between"><div><b>${title}</b> <span class="pts">+${ch.points}</span></div><span class="muted" style="font-size:13px">${n}/${ch.targets.length}</span></div>
+    <div class="targets">${ch.targets.map((t, i) => `<div class="tg ${p.done[i] ? "ok" : ""}"><img class="sprite" src="${spriteUrl(t.id, t.shiny)}" alt="">${p.done[i] ? CHECK(true, "#4CAF50") : ""}<span>${t.shiny ? "★ " : ""}${esc(DEX[t.id - 1].name)}</span></div>`).join("")}</div>
+    ${bar(n / ch.targets.length, p.completed ? "green" : "red")}
+    <div class="muted" style="font-size:12px;margin-top:6px">${p.completed ? '<b style="color:#4CAF50">¡Completado!</b>' : "Termina en " + countdown(ch.end - Date.now())}</div></div>`;
+}
 function viewLogros(D) {
   const uid = store.uid, today = epochDay(Date.now());
-  const chs = [dailyChallenge(uid, today), weeklyChallenge(uid, today)];
-  const done = Object.keys(D.ach.unlocked).length;
-  const groups = ["Pokédex", "Variocolor", "Legendarios", "Tipos", "Platino"];
+  const pass = D.pass, nextTitle = pass.max ? "" : BP_TITLES[pass.level];
+  const dexT = track(D, ACH.filter(a => a.kind === "dex")), shT = track(D, ACH.filter(a => a.kind === "shiny"));
+  const shLocked = !D.ach.unlocked.kanto_150;
+  const plat = ACH.find(a => a.kind === "platinum"), platUn = D.ach.unlocked[plat.id], nDone = Object.keys(D.ach.unlocked).length;
   return `
-  <h2 class="pixel section-title">Retos</h2>
-  ${chs.map(ch => { const p = challengeProgress(ch, D.caps); return `<div class="card" style="margin-bottom:10px">
-    <div class="row" style="justify-content:space-between"><b>${ch.type === "daily" ? "Reto diario" : "Reto semanal"}</b><span class="muted" style="font-size:13px">${p.completed ? "✓ Completado · " : ""}${ch.points} puntos</span></div>
-    <div class="muted" style="font-size:12px">Hasta el ${fmtDT(ch.end - 1)}</div>
-    ${ch.targets.map((t, i) => `<div class="target"><img class="sprite" width="40" height="40" src="${spriteUrl(t.id, t.shiny)}" alt="">${p.done[i] ? '<span class="ok" aria-label="hecho">✓</span>' : '<span aria-hidden="true">○</span>'}<span>Captura ${t.shiny ? "un <b>" + esc(DEX[t.id - 1].name) + " variocolor</b> ★" : "un <b>" + esc(DEX[t.id - 1].name) + "</b>"}</span></div>`).join("")}
-  </div>`; }).join("")}
-  <h2 class="pixel section-title">Pase de batalla</h2>
-  <div class="card">
-    <div class="row" style="justify-content:space-between"><b>Nivel ${D.pass.level}${D.pass.max ? " (máximo)" : ""}</b><span class="muted" style="font-size:13px">${D.cp.points} puntos</span></div>
-    ${D.pass.max ? "" : `<div class="bar" style="margin:8px 0" role="progressbar" aria-valuenow="${D.pass.into}" aria-valuemax="1000" aria-label="Progreso al siguiente nivel"><i style="width:${D.pass.into / 10}%"></i></div><div class="muted" style="font-size:12px">${D.pass.into}/1000 para el nivel ${D.pass.level + 1}</div>`}
-    <div class="pass" style="margin-top:10px">${BP_TITLES.map((t, i) => `<div class="lvl ${D.pass.level > i ? "done" : ""}"><div class="pixel n">Nv. ${i + 1}</div>${D.pass.level > i ? "" : "🔒 "}${esc(t)}</div>`).join("")}</div>
-  </div>
-  <h2 class="pixel section-title">Logros · ${done}/${ACH.length}</h2>
-  ${groups.map(g => `<div class="card" style="margin-bottom:10px"><b>${g}</b>${ACH.filter(a => a.cat === g).map(a => {
-    const un = D.ach.unlocked[a.id]; const hidden = a.requires && !D.ach.unlocked[a.requires] && !un;
-    const pr = Math.min(D.ach.progress(a), D.ach.target(a));
-    return `<div class="ach ${un ? "done" : ""}"><div class="ico">${un ? "🏆" : "🔒"}</div>
-      <div style="flex:1"><div class="t">${hidden ? "Logro oculto" : esc(a.title)}</div><div class="d">${hidden ? "Completa la Pokédex de Kanto para verlo." : esc(a.desc)}${un ? " · " + fmtDate(un) : ""}</div></div>
-      <div class="p">${hidden ? "" : pr + "/" + D.ach.target(a)}</div></div>`;
-  }).join("")}</div>`).join("")}`;
+  <button class="card acard bpcard" id="openPass" aria-label="Abrir el pase de batalla">
+    <img class="sprite" width="48" height="48" src="${BALL_ITEM(Math.max(1, pass.level))}" alt="">
+    <div style="flex:1;text-align:left"><div class="muted" style="font-size:12px">Pase de batalla</div><b>Nivel ${pass.level}${pass.max ? " · máximo" : ""}</b>
+      <div style="font-size:13px">${pass.level ? esc(BP_TITLES[pass.level - 1]) : "Completa retos para subir de nivel"}</div>
+      <div style="margin-top:8px">${bar(pass.max ? 1 : pass.into / POINTS_PER_LEVEL, "red")}</div>
+      <div class="row" style="justify-content:space-between;font-size:12px;margin-top:4px"><span>${pass.max ? D.cp.points + " puntos" : pass.into + " / " + POINTS_PER_LEVEL + " puntos"}</span>${nextTitle ? `<span class="muted">Siguiente: ${esc(nextTitle)}</span>` : ""}</div></div></button>
+  <div class="row ahead"><h2>Retos</h2><b style="color:var(--red)">${D.cp.points} <span style="color:#F8D030">★</span></b></div>
+  ${challengeCard(dailyChallenge(uid, today), D, "Reto diario")}${challengeCard(weeklyChallenge(uid, today), D, "Reto semanal")}
+  <div class="card acard ${platUn ? "platun" : ""}" style="margin-top:14px"><div class="row" style="gap:12px"><div class="trophy ${platUn ? "gold" : ""}">🏆</div><div style="flex:1"><b>${esc(plat.title)}</b><div class="muted" style="font-size:13px">${nDone} de ${ACH.length} logros</div></div></div>
+    <div style="margin-top:12px">${bar(nDone / ACH.length, "diamond" + (platUn ? " shimmer" : ""))}</div>
+    ${platUn ? `<div class="row" style="justify-content:space-between;margin-top:10px;font-size:12px"><span style="color:var(--red)">Recompensa: título «${esc(plat.reward)}»</span><span class="muted">${fmtDate(platUn)}</span></div>` : ""}</div>
+  <h2 class="ahead">Pokédex de Kanto</h2>
+  <div class="card acard"><div class="row" style="justify-content:space-between"><b style="font-size:17px">${dexT.current} / ${dexT.max}</b>${dexT.rank ? `<span style="color:var(--red);font-weight:600;font-size:13px">${esc(dexT.rank.title)}</span>` : ""}</div>
+    <div style="margin:8px 0 12px">${bar(dexT.p, "red")}</div>${rankRows(D, dexT.items, "#DC0A2D", "Pokémon")}</div>
+  <h2 class="ahead">Pokédex variocolor</h2>
+  <div class="card acard shcard ${shLocked ? "locked" : ""}">${shLocked
+    ? `<div class="row" style="gap:8px"><span aria-hidden="true">🔒</span><b>Completa la Pokédex de Kanto para desbloquearla</b></div><div style="margin-top:10px">${bar(dexT.p, "gold")}</div><div class="muted" style="font-size:12px;margin-top:4px">${dexT.current} / ${dexT.max}</div>`
+    : `<div class="row" style="justify-content:space-between"><b style="font-size:17px">${shT.current} / ${shT.max}</b>${shT.rank ? `<span style="color:#B8860B;font-weight:600;font-size:13px">${esc(shT.rank.title)}</span>` : ""}</div><div style="margin:8px 0 12px">${bar(shT.p, "gold")}</div>${rankRows(D, shT.items, "#D4AF37", "variocolor")}`}</div>
+  <h2 class="ahead">Tipos</h2>
+  <div class="tgrid">${TYPES.map(t => { const tr = track(D, ACH.filter(a => a.type === t)); return `<button class="card tcard" data-ttype="${t}" style="--tc:${TYPE_COLOR[t]}"><div class="row" style="justify-content:space-between"><span class="type" style="background:${TYPE_COLOR[t]}">${TYPE_ES[t]}</span><small>${tr.current}/${tr.max}</small></div><div class="tr">${tr.rank ? esc(tr.rank.title) : '<span class="muted">Sin rango</span>'}</div>${bar(tr.p, "", "background:" + TYPE_COLOR[t])}</button>`; }).join("")}</div>
+  <h2 class="ahead">Legendarios</h2>
+  <div class="tgrid">${ACH.filter(a => a.kind === "legendary").map(a => { const un = D.ach.unlocked[a.id], col = LEG_COLOR[a.pokemonId]; return `<div class="card acard leg"><div class="row" style="justify-content:space-between;align-items:flex-start"><b>${esc(a.title)}</b>${un ? CHECK(true, col) : ""}</div><div class="row" style="gap:6px;margin:4px 0"><img class="sprite" width="40" height="40" src="${spriteUrl(a.pokemonId, false)}" alt=""><small class="muted">${esc(a.desc)}</small></div>${bar(un ? 1 : 0, "", "background:" + col)}${un ? `<small class="muted">${fmtDate(un)}</small>` : ""}</div>`; }).join("")}</div>`;
+}
+function openTypeSheet(t) {
+  const D = derived(), tr = track(D, ACH.filter(a => a.type === t));
+  sheet(`<button class="close" data-close aria-label="Cerrar">×</button><div class="row" style="gap:12px"><span class="type" style="background:${TYPE_COLOR[t]};font-size:13px">${TYPE_ES[t]}</span><b>${tr.current} / ${tr.max}</b></div>
+    <div style="margin:12px 0 16px">${bar(tr.p, "", "background:" + TYPE_COLOR[t])}</div>${rankRows(D, tr.items, TYPE_COLOR[t], "capturas")}
+    <p class="muted" style="font-size:12px">Cuentan las capturas normales y variocolor de cada especie de tipo ${TYPE_ES[t]}.</p>`);
+}
+function openPassSheet() {
+  const D = derived(), lvl = D.pass.level;
+  sheet(`<button class="close" data-close aria-label="Cerrar">×</button><h2 class="pixel" style="font-size:12px">Pase de batalla</h2>
+    <p class="muted" style="font-size:13px">Cada reto diario da ${DAILY_POINTS} puntos y cada reto semanal ${WEEKLY_POINTS}. Cada ${POINTS_PER_LEVEL} puntos subes un nivel y desbloqueas un título.</p>
+    ${BP_TITLES.map((t, i) => `<div class="rank ${lvl > i ? "" : "off"}"><img class="sprite" width="32" height="32" src="${BALL_ITEM(i + 1)}" alt="">${CHECK(lvl > i, "#DC0A2D")}<div class="rk"><div>${esc(t)}</div><small>Nivel ${i + 1} · ${(i + 1) * POINTS_PER_LEVEL} puntos</small></div></div>`).join("")}`);
 }
 function celebrate(D) {
   if (!D.badge || $("#layer").innerHTML) return;
@@ -668,14 +703,19 @@ async function importData(file) {
 function sheet(html, modal) { $("#layer").innerHTML = `<div class="sheet" ${modal ? 'data-modal="1"' : ""} role="dialog" aria-modal="true"><div class="panel pop">${html}</div></div>`; }
 function closeSheet() { $("#layer").innerHTML = ""; }
 document.addEventListener("click", e => {
-  const t = e.target.closest("[data-tab],[data-mon],[data-f],[data-close],[data-go],#clearF,#sizeBtn,#validate,#retake,[data-zoom],#camOn,#camOff,#shoot,#exportBtn");
+  if (e.target.closest("#openPass")) { openPassSheet(); return; }
+  const tt = e.target.closest("[data-ttype]"); if (tt) { openTypeSheet(tt.dataset.ttype); return; }
+  const t = e.target.closest("[data-st],[data-sub],[data-type],[data-tab],[data-mon],[data-f],[data-close],[data-go],#clearF,#sizeBtn,#validate,#retake,[data-zoom],#camOn,#camOff,#shoot,#exportBtn");
   if (!t) { if (e.target.classList.contains("sheet") && !e.target.dataset.modal) closeSheet(); return; }
-  if (t.dataset.tab) { state.tab = t.dataset.tab; closeSheet(); render(); scrollTo(0, 0); }
+  if (t.dataset.st) { const v = t.dataset.st; state.f = state.f.state === v ? { ...state.f, state: null, normal: false, shiny: false } : { ...state.f, state: v }; render(); }
+  else if (t.dataset.sub) { if (state.f.state) { state.f[t.dataset.sub] = !state.f[t.dataset.sub]; render(); } }
+  else if (t.dataset.type) { const ty = t.dataset.type, ts = state.f.types; state.f.types = ts.includes(ty) ? ts.filter(x => x !== ty) : [...ts, ty]; render(); }
+  else if (t.dataset.tab) { state.tab = t.dataset.tab; closeSheet(); render(); scrollTo(0, 0); }
   else if (t.dataset.mon) { if (!t.classList.contains("dim")) openMon(+t.dataset.mon); }
   else if (t.dataset.f) { const k = t.dataset.f, v = t.dataset.v; state.f[k] = v === "toggle" ? !state.f[k] : (state.f[k] === v && k === "variant" ? "all" : v); render(); }
   else if (t.hasAttribute("data-close")) closeSheet();
   else if (t.dataset.go) { state.tab = t.dataset.go; render(); scrollTo(0, 0); }
-  else if (t.id === "clearF") { state.f = { ...state.f, q: "", status: "all", variant: "all", type: "", leg: false }; render(); }
+  else if (t.id === "clearF") { state.f = { ...state.f, q: "", state: null, normal: false, shiny: false, types: [], leg: false }; render(); }
   else if (t.id === "sizeBtn") { state.f.big = !state.f.big; render(); }
   else if (t.id === "validate") validate();
   else if (t.id === "retake") { closeSheet(); state.pending = null; render(); }
@@ -688,8 +728,7 @@ document.addEventListener("click", e => {
 document.addEventListener("submit", async e => { if (e.target.id === "welcome") { e.preventDefault(); const v = $("#tname").value.trim(); if (v) { await store.saveProfile({ name: v.slice(0, 20) }); render(); } } });
 document.addEventListener("input", e => { if (e.target.id === "q") { state.f.q = e.target.value; const pos = e.target.selectionStart; render(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); clearTimeout(window._sq); window._sq = setTimeout(scrollToFirstMatch, 250); } });
 document.addEventListener("change", async e => {
-  if (e.target.id === "typeSel") { state.f.type = e.target.value; render(); }
-  else if (e.target.id === "file") pickFile(e.target.files[0]);
+  if (e.target.id === "file") pickFile(e.target.files[0]);
   else if (e.target.id === "importFile") importData(e.target.files[0]);
   else if (e.target.id === "titleSel") { await store.saveProfile({ title: e.target.value || null }); render(); toast("Título actualizado"); }
 });
