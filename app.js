@@ -171,7 +171,8 @@ async function getDetails(id) {
     const vd = e.version_details.filter(v => v.version.name === "firered" || v.version.name === "leafgreen");
     if (!vd.length) continue;
     const vers = [...new Set(vd.map(v => v.version.name === "firered" ? "RF" : "VH"))].join("/");
-    const methods = [...new Set(vd.flatMap(v => v.encounter_details.map(d => d.method.name)))];
+    const methods = [...new Set(vd.flatMap(v => v.encounter_details.map(d => d.method.name)))].filter(m => !/colosseum|xd|bonus/.test(m));
+    if (!methods.length) continue;
     places.push({ area: prettyArea(e.location_area.name), vers, methods: methods.map(methodEs).join(", ") });
   }
   const out = { height: p.height, weight: p.weight, flavor: ft ? ft.flavor_text.replace(/[\f\n­]+/g, " ").replace(/\s+/g, " ").trim() : "", flavorLang: ft?.language.name, genus, places, cr: sp.capture_rate };
@@ -179,7 +180,8 @@ async function getDetails(id) {
 }
 const METHOD = { walk: "hierba", "old-rod": "caña vieja", "good-rod": "caña buena", "super-rod": "supercaña", surf: "surf", "rock-smash": "golpe roca", gift: "regalo", "only-one": "único", "pokeflute": "Poké Flauta", "headbutt": "golpe cabeza" };
 const methodEs = m => METHOD[m] || m.replace(/-/g, " ");
-const prettyArea = s => s.replace(/^kanto-/, "").replace(/-area$/, "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()).replace(/Route/g, "Ruta");
+const PLACE_ES = { "viridian forest": "Bosque Verde", "power plant": "Central Energía", "mt moon": "Monte Moon", "rock tunnel": "Túnel Roca", "safari zone": "Zona Safari", "seafoam islands": "Islas Espuma", "victory road": "Calle Victoria", "cerulean cave": "Cueva Celeste", "pokemon tower": "Torre Pokémon", "digletts cave": "Cueva Diglett", "pokemon mansion": "Mansión Pokémon", "pallet town": "Pueblo Paleta", "viridian city": "Ciudad Verde", "pewter city": "Ciudad Plateada", "cerulean city": "Ciudad Celeste", "vermilion city": "Ciudad Carmín", "lavender town": "Pueblo Lavanda", "celadon city": "Ciudad Azulona", "fuchsia city": "Ciudad Fucsia", "saffron city": "Ciudad Azafrán", "cinnabar island": "Isla Canela", "one island": "Isla Prima", "two island": "Isla Secunda", "three island": "Isla Tera", "four island": "Isla Quarta", "five island": "Isla Quinta", "six island": "Isla Sexta", "seven island": "Isla Séptima", "sea route": "Ruta marina", "route": "Ruta", "silph co": "Silph S.A." };
+const prettyArea = s => { let t = s.replace(/^kanto-/, "").replace(/-area$/, "").replace(/-/g, " "); for (const [en, es] of Object.entries(PLACE_ES)) t = t.replace(new RegExp("\\b" + en + "\\b"), es); return t.replace(/\b([a-z])/g, c => c.toUpperCase()).replace(/\b(\d+)f\b/gi, "planta $1").replace(/\bB(\d+)f\b/gi, "sótano $1"); };
 
 // ======================= ESTADO E INTERFAZ =======================
 const state = { tab: "pokedex", loaded: false, syncNote: "", camError: "", f: { q: "", status: "all", variant: "all", type: "", leg: false, big: false, shinySprites: false }, pending: null, stream: null };
@@ -541,11 +543,24 @@ async function validate() {
   const px = ng.getImageData(0, 0, 240, 160).data;
   // 2. OCR de las filas de número y nombre
   let text = "";
-  try { const w = await getWorker(status); status("Leyendo el número y el nombre…"); const res = await w.recognize(regionCanvas(n, LAYOUT.INFO_TEXT, 4)); text = res.data.text || ""; }
+  let numText = "";
+  try {
+    const w = await getWorker(status); status("Leyendo el número y el nombre…");
+    await w.setParameters({ tessedit_pageseg_mode: "6", tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.º°/♀♂' " });
+    text = (await w.recognize(regionCanvas(n, LAYOUT.INFO_TEXT, 4))).data.text || "";
+    await w.setParameters({ tessedit_pageseg_mode: "7", tessedit_char_whitelist: "0123456789" });
+    numText = (await w.recognize(regionCanvas(n, [LAYOUT.DEX_NUMBER[0] - 4, LAYOUT.DEX_NUMBER[1] - 1, LAYOUT.DEX_NUMBER[2] + 4, LAYOUT.DEX_NUMBER[3] + 1], 6))).data.text || "";
+  }
   catch (_) { closeSheet(); state.camError = "No se ha podido cargar el lector de texto. Comprueba la conexión a internet y vuelve a intentarlo."; return render(); }
   // 3. Número + nombre (igual que CaptureAnalyzer)
-  const cands = numberCandidates(text); let dex = null, nameOk = null;
+  const cands = [...new Set([...numberCandidates(numText), ...numberCandidates(text)])]; let dex = null, nameOk = null;
   for (const c of cands) { if (c >= 1 && c <= KANTO_SIZE) { if (nameMatchesText(text, DEX[c - 1].name)) { dex = c; nameOk = true; break; } if (dex == null) { dex = c; nameOk = false; } } }
+  if (!nameOk) {
+    // El nombre identifica a un único Pokémon y el número leído solo falla en un dígito: se acepta (error típico del OCR).
+    const byName = DEX.slice(0, KANTO_SIZE).filter(m => nameMatchesText(text, m.name));
+    const raw = (numText + " " + text).replace(/[Oo]/g, "0").match(/\d{2,3}/g) || [];
+    if (byName.length === 1) { const want = pad(byName[0].id); if (raw.some(r => { const s = r.padStart(3, "0"); return s.length === 3 && [...s].filter((ch, i) => ch !== want[i]).length <= 1; })) { dex = byName[0].id; nameOk = true; } }
+  }
   if (dex == null && cands.length) { dex = cands[0]; nameOk = false; }
   // 4. Estrella variocolor tras el balance de blancos
   const isShiny = countStarPixels(whiteBalance(px, 240, 160), 240, 160) >= 6;
@@ -558,7 +573,7 @@ async function validate() {
     sheet(`<button class="close" data-close aria-label="Cerrar">×</button><h2 class="pixel" style="font-size:12px;line-height:1.6">No se ha encontrado ningún Pokémon</h2>
       <ul>${reasons.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
       <p class="muted" style="font-size:13px">Ajusta mejor el recuadro a la pantalla o repite la foto con más luz y sin reflejos.</p>
-      <details><summary class="muted" style="font-size:13px">Texto leído</summary><div class="ocr">${esc(text.trim() || "(nada)")}</div></details>
+      <details><summary class="muted" style="font-size:13px">Texto leído</summary><div class="ocr">${esc((text.trim() + "\n" + numText.trim()).trim() || "(nada)")}</div></details>
       <div class="row" style="margin-top:12px"><button class="btn" data-close style="flex:1">Ajustar</button><button class="btn ghost" id="retake">Repetir foto</button></div>`);
     return;
   }
