@@ -116,3 +116,27 @@ textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px
 .kv dt{color:var(--muted)} .kv dd{margin:0}
 details summary{cursor:pointer}
 .ocr{font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:pre-wrap;background:var(--chip);border-radius:8px;padding:8px;margin-top:6px}
+
+/* ---- Cajas del PC (igual que la app Android) ---- */
+.pc{max-width:520px;margin:0 auto;touch-action:pan-x pan-y}
+.pcbox{margin:14px 0 4px}
+.pcbox-h{display:flex;justify-content:space-between;align-items:center;margin:0 0 6px;padding-bottom:6px;border-bottom:1px solid var(--line);font-size:14px;font-weight:600;color:var(--red)}
+.pcbox-h .cnt{display:flex;gap:10px;color:var(--text);font-size:13px;font-weight:700}
+.pcbox-h .cnt span{display:inline-flex;align-items:center;gap:3px}
+.pcbox-h svg{width:14px;height:14px}
+.pcgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.pc.large .pcgrid{grid-template-columns:repeat(3,1fr);gap:6px}
+.pc .mon{aspect-ratio:1;min-height:0;padding:2px;border-radius:8px;background:var(--chip);border:0;gap:0;justify-content:center}
+.pc.large .mon{aspect-ratio:auto;padding:8px 4px;border-radius:12px;gap:2px}
+.pc .mon img.sp{width:40px;height:40px}
+.pc.large .mon img.sp{width:72px;height:72px}
+.pc .mon .num{font-size:8px;color:var(--red);margin-top:-2px}
+.pc.large .mon .num{font-size:10px}
+.pc .mon .nm{font-size:12px}
+.pc .mon .ind{top:3px;left:4px;right:4px;justify-content:space-between}
+.pc .mon .ind svg{width:10px;height:10px}
+.pc.large .mon .ind svg{width:14px;height:14px}
+.pc .mon.got{box-shadow:inset 0 0 0 1.5px color-mix(in srgb,var(--red) 55%,transparent)}
+.pc .mon.dim{opacity:.35;cursor:default}
+.pc .mon.dim img.sp{filter:grayscale(1)}
+.pc .mon.miss:not(.dim) img.sp{filter:grayscale(1) contrast(.6) opacity(.55)}

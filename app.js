@@ -238,25 +238,25 @@ function viewWelcome() {
     <p class="muted" style="font-size:13px">Tus datos se guardan solo en este navegador. Desde el Perfil puedes exportarlos e importarlos en otro dispositivo.</p></div>`;
 }
 
-// ---------- Pokédex ----------
+// ---------- Pokédex (cajas de 30 como la app Android: 6 columnas x 5 filas) ----------
+function matchesFilters(mn, cs) {
+  const f = state.f, q = f.q.trim().toLowerCase();
+  if (q && !(mn.name.toLowerCase().includes(q) || String(mn.id) === q.replace(/^0+/, "") || pad(mn.id).startsWith(q))) return false;
+  if (f.status === "got" && !cs.length) return false;
+  if (f.status === "miss" && cs.length) return false;
+  if (f.variant === "normal" && !cs.some(c => !c.isShiny)) return false;
+  if (f.variant === "shiny" && !cs.some(c => c.isShiny)) return false;
+  if (f.type && !mn.types.includes(f.type)) return false;
+  if (f.leg && !LEGENDARY.includes(mn.id)) return false;
+  return true;
+}
 function viewDex(D) {
-  const f = state.f; const q = f.q.trim().toLowerCase();
-  const list = DEX.filter(mn => {
-    const cs = D.byId[mn.id] || [];
-    if (q && !(mn.name.toLowerCase().includes(q) || String(mn.id) === q.replace(/^0+/, "") || pad(mn.id).includes(q))) return false;
-    if (f.status === "got" && !cs.length) return false;
-    if (f.status === "miss" && cs.length) return false;
-    if (f.variant === "normal" && !cs.some(c => !c.isShiny)) return false;
-    if (f.variant === "shiny" && !cs.some(c => c.isShiny)) return false;
-    if (f.type && !mn.types.includes(f.type)) return false;
-    if (f.leg && !LEGENDARY.includes(mn.id)) return false;
-    return true;
-  });
-  const anyF = q || f.status !== "all" || f.variant !== "all" || f.type || f.leg;
+  const f = state.f;
+  const anyF = f.q.trim() || f.status !== "all" || f.variant !== "all" || f.type || f.leg;
   const dexN = Object.keys(D.byId).filter(id => id <= KANTO_SIZE).length;
   const shN = Object.entries(D.byId).filter(([id, l]) => id <= KANTO_SIZE && l.some(c => c.isShiny)).length;
-  const boxes = []; for (let b = 0; b < 151; b += 30) boxes.push([b + 1, Math.min(b + 30, 151)]);
   const chip = (k, v, label) => `<button class="chip" aria-pressed="${f[k] === v}" data-f="${k}" data-v="${v}">${label}</button>`;
+  const boxes = []; for (let a = 1; a <= 151; a += 30) boxes.push([a, Math.min(a + 29, 151)]);
   return `
   <div class="card">
     <div class="progress pixel"><span>Pokédex</span><span title="Capturados">◓ ${dexN}/${KANTO_SIZE}</span><span title="Variocolor" style="color:var(--gold)">★ ${shN}/${KANTO_SIZE}</span></div>
@@ -264,7 +264,7 @@ function viewDex(D) {
   </div>
   <div class="filters">
     <input class="search" id="q" type="search" placeholder="Buscar por nombre o número" value="${esc(f.q)}" aria-label="Buscar Pokémon">
-    <button class="chip" id="sizeBtn" aria-pressed="${f.big}">${f.big ? "Cajas grandes" : "Cajas pequeñas"}</button>
+    <button class="chip" id="sizeBtn" aria-pressed="${f.big}" title="También puedes pellizcar la cuadrícula">${f.big ? "Vista grande" : "Vista de cajas"}</button>
     <button class="chip" data-f="shinySprites" data-v="toggle" aria-pressed="${f.shinySprites}">★ Sprites variocolor</button>
   </div>
   <div class="filters">
@@ -274,20 +274,37 @@ function viewDex(D) {
     <select id="typeSel" aria-label="Filtrar por tipo"><option value="">Todos los tipos</option>${TYPES.map(t => `<option value="${t}" ${f.type === t ? "selected" : ""}>${TYPE_ES[t]}</option>`).join("")}</select>
     ${anyF ? `<button class="chip" id="clearF">Limpiar filtros</button>` : ""}
   </div>
-  ${boxes.map(([a, b]) => {
-    const items = list.filter(mn => mn.id >= a && mn.id <= b); if (!items.length) return "";
-    const got = DEX.slice(a - 1, Math.min(b, KANTO_SIZE)).filter(mn => D.byId[mn.id]).length;
-    return `<section class="box"><h3 class="pixel"><span>Caja ${Math.ceil(a / 30)} · ${pad(a)}–${pad(b)}</span><span class="muted">${got}/${Math.min(b, KANTO_SIZE) - a + 1}</span></h3>
-    <div class="grid" style="--cell:${f.big ? 120 : 92}px">${items.map(mn => cell(mn, D.byId[mn.id] || [])).join("")}</div></section>`;
-  }).join("") || `<div class="card muted" style="text-align:center">No hay Pokémon con esos filtros.</div>`}`;
+  <div class="pc ${f.big ? "large" : "boxmode"}" id="pc">
+  ${boxes.map(([a, b], i) => {
+    const mons = DEX.slice(a - 1, b);
+    const reg = mons.filter(m => m.id <= KANTO_SIZE);
+    const got = reg.filter(m => D.byId[m.id]).length, sh = reg.filter(m => (D.byId[m.id] || []).some(c => c.isShiny)).length;
+    return `<section class="pcbox" aria-label="Caja ${i + 1}">
+      <h3 class="pcbox-h"><span>Caja ${i + 1} · #${pad(a)}–#${pad(b)}</span><span class="cnt"><span title="Capturados">${ICON.ball} ${got}/${reg.length}</span><span title="Variocolor">${ICON.star} ${sh}/${reg.length}</span></span></h3>
+      <div class="pcgrid">${mons.map(mn => cell(mn, D.byId[mn.id] || [])).join("")}</div></section>`;
+  }).join("")}
+  </div>`;
 }
 function cell(mn, cs) {
-  const got = cs.length > 0, sh = cs.some(c => c.isShiny);
-  return `<button class="mon ${got ? "got" : "miss"}" data-mon="${mn.id}" aria-label="${pad(mn.id)} ${esc(mn.name)}${got ? ", capturado" : ", sin capturar"}${sh ? ", variocolor" : ""}">
-    <span class="ind">${got ? ICON.ball : ""}${sh ? ICON.star : ""}</span>
+  const got = cs.length > 0, sh = cs.some(c => c.isShiny), match = matchesFilters(mn, cs);
+  const label = `${pad(mn.id)} ${mn.name}, ${got ? "capturado" : "sin capturar"}${sh ? ", variocolor capturado" : ""}${match ? "" : ", no coincide con el filtro"}`;
+  return `<button class="mon ${got ? "got" : "miss"} ${match ? "" : "dim"}" data-mon="${mn.id}" ${match ? "" : 'tabindex="-1" aria-disabled="true"'} aria-label="${esc(label)}">
+    <span class="ind"><span class="i-ball">${got ? ICON.ball : ""}</span><span class="i-star">${sh ? ICON.star : ""}</span></span>
     <img class="sp" loading="lazy" src="${spriteUrl(mn.id, state.f.shinySprites)}" alt="" onerror="this.onerror=null;this.src='${SPR_FALLBACK}${mn.id}.png'">
-    <span class="num pixel">${pad(mn.id)}</span><span class="nm">${esc(mn.name)}</span></button>`;
+    <span class="num pixel">#${pad(mn.id)}</span>${state.f.big ? `<span class="nm">${esc(mn.name)}</span>` : ""}</button>`;
 }
+// Al buscar, desplazar hasta la primera coincidencia (como en Android)
+function scrollToFirstMatch() {
+  if (!state.f.q.trim()) return; const el = document.querySelector(".pc .mon:not(.dim)"); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+// Pellizcar para cambiar entre vista de cajas (6 columnas) y vista grande (3 columnas)
+let pinch = null;
+document.addEventListener("touchstart", e => { if (e.touches.length === 2 && e.target.closest("#pc")) { const [a, b] = e.touches; pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), done: false }; } }, { passive: true });
+document.addEventListener("touchmove", e => {
+  if (!pinch || e.touches.length !== 2 || pinch.done) return; const [a, b] = e.touches; const r = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / pinch.d;
+  if (r > 1.25 && !state.f.big) { state.f.big = true; pinch.done = true; render(); } else if (r < 0.8 && state.f.big) { state.f.big = false; pinch.done = true; render(); }
+}, { passive: true });
+document.addEventListener("touchend", () => { pinch = null; });
 async function openMon(id) {
   const mn = DEX[id - 1], D = derived(), cs = D.byId[id] || [];
   const firstN = cs.find(c => !c.isShiny), firstS = cs.find(c => c.isShiny);
@@ -654,7 +671,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-tab],[data-mon],[data-f],[data-close],[data-go],#clearF,#sizeBtn,#validate,#retake,[data-zoom],#camOn,#camOff,#shoot,#exportBtn");
   if (!t) { if (e.target.classList.contains("sheet") && !e.target.dataset.modal) closeSheet(); return; }
   if (t.dataset.tab) { state.tab = t.dataset.tab; closeSheet(); render(); scrollTo(0, 0); }
-  else if (t.dataset.mon) openMon(+t.dataset.mon);
+  else if (t.dataset.mon) { if (!t.classList.contains("dim")) openMon(+t.dataset.mon); }
   else if (t.dataset.f) { const k = t.dataset.f, v = t.dataset.v; state.f[k] = v === "toggle" ? !state.f[k] : (state.f[k] === v && k === "variant" ? "all" : v); render(); }
   else if (t.hasAttribute("data-close")) closeSheet();
   else if (t.dataset.go) { state.tab = t.dataset.go; render(); scrollTo(0, 0); }
@@ -669,7 +686,7 @@ document.addEventListener("click", e => {
   else if (t.dataset.zoom) sheet(`<button class="close" data-close aria-label="Cerrar">×</button><img class="photo sprite" src="${t.src}" alt="Foto de la captura ampliada" style="margin-top:44px">`);
 });
 document.addEventListener("submit", async e => { if (e.target.id === "welcome") { e.preventDefault(); const v = $("#tname").value.trim(); if (v) { await store.saveProfile({ name: v.slice(0, 20) }); render(); } } });
-document.addEventListener("input", e => { if (e.target.id === "q") { state.f.q = e.target.value; const pos = e.target.selectionStart; render(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); } });
+document.addEventListener("input", e => { if (e.target.id === "q") { state.f.q = e.target.value; const pos = e.target.selectionStart; render(); const q = $("#q"); q.focus(); q.setSelectionRange(pos, pos); clearTimeout(window._sq); window._sq = setTimeout(scrollToFirstMatch, 250); } });
 document.addEventListener("change", async e => {
   if (e.target.id === "typeSel") { state.f.type = e.target.value; render(); }
   else if (e.target.id === "file") pickFile(e.target.files[0]);
