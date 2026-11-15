@@ -499,7 +499,7 @@ const maxDist = n => n <= 3 ? 0 : n <= 6 ? 1 : 2;
 function numberCandidates(text) {
   const out = [];
   for (const tok of text.split(/\s+/)) {
-    const s = tok.replace(/^(no|nº|n°|n\.)/i, "").trim(); if (!/\d/.test(s)) continue;
+    const s = tok.replace(/^.{0,2}?(no|nº|n°|n\.)/i, "").trim(); if (!/\d/.test(s)) continue;
     const n = s.replace(/[Oo]/g, "0").replace(/[Il|]/g, "1").replace(/[Ss]/g, "5").replace(/[Bb]/g, "8").replace(/[Zz]/g, "2").replace(/[^\d]/g, "");
     if (/^\d{1,3}$/.test(n)) { const v = +n; if (v >= 1 && v <= 386 && !out.includes(v)) out.push(v); }
   }
